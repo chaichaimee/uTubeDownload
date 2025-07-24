@@ -1,3 +1,5 @@
+# uTubeDownload_settings.py
+
 import wx
 import gui
 import config
@@ -63,6 +65,7 @@ class AudioYoutubeDownloadPanel(SettingsPanel):
         )
         self.playlistModeChk.SetValue(getINI("PlaylistMode"))
 
+        # เพิ่ม Checkbox สำหรับ Skip existing files
         self.skipExistingChk = helper.addItem(
             wx.CheckBox(self, label=_("Skip existing files"))
         )
@@ -100,6 +103,7 @@ class AudioYoutubeDownloadPanel(SettingsPanel):
         setINI("BeepWhileConverting", self.beepChk.GetValue())
         setINI("MP3Quality", int(self.qualityChoice.GetStringSelection()))
         setINI("PlaylistMode", self.playlistModeChk.GetValue())
+        # บันทึกค่าของ Skip existing files
         setINI("SkipExisting", self.skipExistingChk.GetValue())
         setINI("ResumeOnRestart", self.resumeOnRestartChk.GetValue())
         setINI("Logging", self.loggingChk.GetValue())

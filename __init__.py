@@ -1,6 +1,4 @@
-# Copyright (C) 2025 ['chai chaimee]
-# Licensed under GNU General Public License. See COPYING.txt for details.
-
+# __init__.py
 import globalPluginHandler
 from scriptHandler import script
 import ui
@@ -14,15 +12,12 @@ import time
 
 addonHandler.initTranslation()
 
-# Constants
 AddOnSummary = "uTubeDownload"
 AddOnName = "uTubeDownload"
 AddOnPath = os.path.dirname(__file__)
 sectionName = AddOnName
-
-# Double tap detection
 _last_tap_time = 0
-_double_tap_threshold = 0.3  # 300 milliseconds
+_double_tap_threshold = 0.3
 
 def initConfiguration():
     confspec = {
@@ -46,26 +41,30 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         super().__init__()
         
         from .uTubeDownload_core import (
-            CheckFolders, resumeInterruptedDownloads,
+            initialize_folders, resumeInterruptedDownloads,
             convertToMP, getCurrentDocumentURL,
-            DownloadPath, setINI
+            DownloadPath, setINI, PlayWave
         )
-        from .uTubeDownload_settings import AudioYoutubeDownloadPanel
         
         self.core_functions = {
-            'CheckFolders': CheckFolders,
+            'initialize_folders': initialize_folders,
             'resumeInterruptedDownloads': resumeInterruptedDownloads,
             'convertToMP': convertToMP,
             'getCurrentDocumentURL': getCurrentDocumentURL,
             'DownloadPath': DownloadPath,
-            'setINI': setINI
+            'setINI': setINI,
+            'PlayWave': PlayWave
         }
         
-        self.core_functions['CheckFolders']()
+        self.core_functions['initialize_folders']()
         wx.CallAfter(self.core_functions['resumeInterruptedDownloads'])
 
-        if AudioYoutubeDownloadPanel not in NVDASettingsDialog.categoryClasses:
-            NVDASettingsDialog.categoryClasses.append(AudioYoutubeDownloadPanel)
+        try:
+            from .uTubeDownload_settings import AudioYoutubeDownloadPanel
+            if AudioYoutubeDownloadPanel not in NVDASettingsDialog.categoryClasses:
+                NVDASettingsDialog.categoryClasses.append(AudioYoutubeDownloadPanel)
+        except ImportError:
+            pass
 
     def terminate(self):
         try:
@@ -81,25 +80,22 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     @script(description=_("Download MP3 (single tap) or MP4 (double tap)"), gesture="kb:NVDA+y")
     def script_downloadMP3OrMP4(self, gesture):
         global _last_tap_time
-        
         current_time = time.time()
         is_double_tap = (current_time - _last_tap_time) < _double_tap_threshold
         _last_tap_time = current_time
         
         if is_double_tap:
-            # Double tap - download MP4
             url = self.core_functions['getCurrentDocumentURL']()
             if url:
+                self.core_functions['PlayWave']('start')
                 self.core_functions['convertToMP']("mp4", self._get_current_download_path(), config.conf[sectionName]["PlaylistMode"])
         else:
-            # Single tap - wait to see if it's part of a double tap
             def do_single_tap_action():
                 if (time.time() - _last_tap_time) >= _double_tap_threshold:
-                    # Not a double tap, perform single tap action
                     url = self.core_functions['getCurrentDocumentURL']()
                     if url:
+                        self.core_functions['PlayWave']('start')
                         self.core_functions['convertToMP']("mp3", self._get_current_download_path(), config.conf[sectionName]["PlaylistMode"])
-            
             wx.CallLater(int(_double_tap_threshold * 1000), do_single_tap_action)
 
     @script(description=_("Open download folder"), gesture="kb:NVDA+control+y")
