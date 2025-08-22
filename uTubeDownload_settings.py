@@ -60,12 +60,30 @@ class AudioYoutubeDownloadPanel(SettingsPanel):
         except ValueError:
             self.qualityChoice.SetSelection(0)
 
+        # Download section settings moved here
+        self.multipartChk = helper.addItem(
+            wx.CheckBox(self, label=_("Use download section"))
+        )
+        self.multipartChk.SetValue(getINI("UseMultiPart"))
+        
+        connectionsLabel = _("&Number of connections:")
+        self.connectionsChoice = helper.addLabeledControl(
+            connectionsLabel,
+            wx.Choice,
+            choices=[str(i) for i in range(1, 17)]
+        )
+        try:
+            self.connectionsChoice.SetSelection(
+                getINI("MultiPartConnections") - 1
+            )
+        except Exception:
+            self.connectionsChoice.SetSelection(7)  # Default to 8
+
         self.playlistModeChk = helper.addItem(
             wx.CheckBox(self, label=_("Enable &playlist mode by default"))
         )
         self.playlistModeChk.SetValue(getINI("PlaylistMode"))
 
-        # เพิ่ม Checkbox สำหรับ Skip existing files
         self.skipExistingChk = helper.addItem(
             wx.CheckBox(self, label=_("Skip existing files"))
         )
@@ -94,16 +112,15 @@ class AudioYoutubeDownloadPanel(SettingsPanel):
                 except Exception:
                     gui.messageBox(
                         _("Failed to create the specified folder. Please select a valid folder."),
-                        _("Error"),
-                        wx.OK | wx.ICON_ERROR
+                        _("Error"), wx.OK | wx.ICON_ERROR
                     )
                     return
-
-        setINI("ResultFolder", folder)
-        setINI("BeepWhileConverting", self.beepChk.GetValue())
-        setINI("MP3Quality", int(self.qualityChoice.GetStringSelection()))
-        setINI("PlaylistMode", self.playlistModeChk.GetValue())
-        # บันทึกค่าของ Skip existing files
-        setINI("SkipExisting", self.skipExistingChk.GetValue())
-        setINI("ResumeOnRestart", self.resumeOnRestartChk.GetValue())
-        setINI("Logging", self.loggingChk.GetValue())
+            setINI("ResultFolder", folder)
+            setINI("BeepWhileConverting", self.beepChk.GetValue())
+            setINI("MP3Quality", int(self.qualityChoice.GetStringSelection()))
+            setINI("PlaylistMode", self.playlistModeChk.GetValue())
+            setINI("SkipExisting", self.skipExistingChk.GetValue())
+            setINI("ResumeOnRestart", self.resumeOnRestartChk.GetValue())
+            setINI("Logging", self.loggingChk.GetValue())
+            setINI("UseMultiPart", self.multipartChk.GetValue())
+            setINI("MultiPartConnections", int(self.connectionsChoice.GetStringSelection()))
