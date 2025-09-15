@@ -1,0 +1,255 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025 THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: uTubeDownload v 2025.9\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-09-08 10:58+0700\n"
+"PO-Revision-Date: 2025-09-15 17:11+0700\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 3.7\n"
+
+#: __init__.py:87
+msgid "File name cannot be empty"
+msgstr "Le nom de fichier ne peut pas être vide"
+
+#: __init__.py:96
+msgid "Download MP3 (single tap) or MP4 (double tap)"
+msgstr "Télécharger MP3 (un seul toucher) ou MP4 (double toucher)"
+
+#: __init__.py:102
+msgid "Download MP4"
+msgstr "Télécharger MP4"
+
+#: __init__.py:108
+msgid "Download MP3"
+msgstr "Télécharger MP3"
+
+#: __init__.py:112
+msgid "Open download folder"
+msgstr "Ouvrir le dossier de téléchargement"
+
+#: __init__.py:116
+msgid "Error opening folder"
+msgstr "Erreur lors de l'ouverture du dossier"
+
+#: __init__.py:118
+msgid "Invalid download folder"
+msgstr "Dossier de téléchargement non valide"
+
+#: __init__.py:121
+msgid "Toggle playlist mode"
+msgstr "Basculer le mode playlist"
+
+#: __init__.py:123
+msgid "Playlist mode enabled"
+msgstr "Mode playlist activé"
+
+#: __init__.py:123
+msgid "Playlist mode disabled"
+msgstr "Mode playlist désactivé"
+
+#: __init__.py:126
+msgid "uTubeTrim setting"
+msgstr "Paramètres uTubeTrim"
+
+#: __init__.py:129
+msgid "Error: uTubeTrim module not available"
+msgstr "Erreur : module uTubeTrim non disponible"
+
+#: __init__.py:144
+msgid "Error opening uTubeTrim dialog: {str(e)}"
+msgstr "Erreur lors de l'ouverture de la boîte de dialogue uTubeTrim : {str(e)}"
+
+#: __init__.py:148
+msgid "uTubeSnapshot"
+msgstr "uTubeSnapshot"
+
+#: __init__.py:157
+msgid "Error: uTubeSnapshot module not available"
+msgstr "Erreur : module uTubeSnapshot non disponible"
+
+#: __init__.py:165
+msgid "Error importing core functions: {error}"
+msgstr "Erreur lors de l'importation des fonctions de base : {error}"
+
+#: __init__.py:172
+msgid "Error initializing uTubeDownload: {error}"
+msgstr "Erreur lors de l'initialisation de uTubeDownload : {error}"
+
+#: uTubeDownload_core.py:46
+msgid "Cannot create folder"
+msgstr "Impossible de créer le dossier"
+
+#: uTubeDownload_core.py:162
+msgid ""
+"Found {count} interrupted downloads\n"
+"Resume all?"
+msgstr ""
+"{count} téléchargements interrompus trouvés\n"
+"Tout reprendre ?"
+
+#: uTubeDownload_core.py:163
+msgid "Resume downloads"
+msgstr "Reprendre les téléchargements"
+
+#: uTubeDownload_core.py:175
+msgid "Checking interrupted downloads..."
+msgstr "Vérification des téléchargements interrompus..."
+
+#: uTubeDownload_core.py:202
+msgid "Download complete"
+msgstr "Téléchargement terminé"
+
+#: uTubeDownload_core.py:205
+msgid "Download failed"
+msgstr "Échec du téléchargement"
+
+#: uTubeDownload_core.py:209
+msgid "Download failed due to timeout"
+msgstr "Le téléchargement a échoué en raison d'un délai d'attente"
+
+#: uTubeDownload_core.py:214
+msgid "Download failed due to an error"
+msgstr "Le téléchargement a échoué en raison d'une erreur"
+
+#: uTubeDownload_core.py:219
+msgid "Browser required"
+msgstr "Navigateur requis"
+
+#: uTubeDownload_core.py:223
+msgid "URL not found"
+msgstr "URL introuvable"
+
+#: uTubeDownload_core.py:228
+msgid "File exists"
+msgstr "Le fichier existe"
+
+#: uTubeDownload_core.py:237
+msgid "yt-dlp.exe missing"
+msgstr "yt-dlp.exe manquant"
+
+#: uTubeDownload_core.py:257
+msgid "Error: ffmpeg.exe not found."
+msgstr "Erreur : ffmpeg.exe introuvable."
+
+#: uTubeDownload_core.py:259
+msgid "File already exists. Skipping download."
+msgstr "Le fichier existe déjà. Le téléchargement est ignoré."
+
+#: uTubeDownload_core.py:265
+msgid "No valid multimedia link found."
+msgstr "Aucun lien multimédia valide trouvé."
+
+#: uTubeDownload_core.py:270
+msgid "Adding link as {format} to download queue"
+msgstr "Ajout du lien au format {format} à la file d'attente de téléchargement"
+
+#: uTubeDownload_core.py:280
+msgid "Not a YouTube video or valid multimedia link"
+msgstr "Ce n'est pas une vidéo YouTube ou un lien multimédia valide"
+
+#: uTubeDownload_settings.py:19
+msgid "Destination folder"
+msgstr "Dossier de destination"
+
+#: uTubeDownload_settings.py:22
+msgid "&Browse..."
+msgstr "&Parcourir..."
+
+#: uTubeDownload_settings.py:23
+msgid "Select a directory"
+msgstr "Sélectionner un répertoire"
+
+#: uTubeDownload_settings.py:31
+msgid "&Beep while converting"
+msgstr "&Bip pendant la conversion"
+
+#: uTubeDownload_settings.py:34
+msgid "&Say download complete"
+msgstr "&Annoncer la fin du téléchargement"
+
+#: uTubeDownload_settings.py:37
+msgid "MP3 &quality (kbps):"
+msgstr "Qualité MP3 (kbps) :"
+
+#: uTubeDownload_settings.py:44
+msgid "Use download section"
+msgstr "Utiliser la section de téléchargement"
+
+#: uTubeDownload_settings.py:47
+msgid "&Number of connections:"
+msgstr "&Nombre de connexions :"
+
+#: uTubeDownload_settings.py:53
+msgid "Enable &playlist mode by default"
+msgstr "Activer le mode playlist par défaut"
+
+#: uTubeDownload_settings.py:56
+msgid "Skip existing files"
+msgstr "Ignorer les fichiers existants"
+
+#: uTubeDownload_settings.py:59
+msgid "Resume interrupted downloads on restart"
+msgstr "Reprendre les téléchargements interrompus au redémarrage"
+
+#: uTubeDownload_settings.py:62
+msgid "Enable &logging"
+msgstr "Activer la journalisation"
+
+#: uTubeDownload_settings.py:68
+msgid "Failed to create the specified folder. Please select a valid folder."
+msgstr "Échec de la création du dossier spécifié. Veuillez sélectionner un dossier valide."
+
+#: uTubeDownload_settings.py:69
+msgid "Error"
+msgstr "Erreur"
+
+#: uTubeSnapshot.py:17
+msgid "Error creating download folder"
+msgstr "Erreur lors de la création du dossier de téléchargement"
+
+#: uTubeSnapshot.py:22
+msgid "Snapshot file already exists"
+msgstr "Le fichier instantané existe déjà"
+
+#: uTubeSnapshot.py:24
+msgid "Capturing full-size snapshot..."
+msgstr "Capture d'une image instantanée en taille réelle..."
+
+#: uTubeSnapshot.py:27
+msgid "Downloading thumbnail..."
+msgstr "Téléchargement de la vignette..."
+
+#: uTubeSnapshot.py:32
+msgid "Processing snapshot..."
+msgstr "Traitement de l'image instantanée..."
+
+#: uTubeSnapshot.py:34
+msgid "Error: Failed to capture snapshot."
+msgstr "Erreur : Échec de la capture de l'image instantanée."
+
+#: uTubeSnapshot.py:38
+msgid "Error: No snapshot file created."
+msgstr "Erreur : Aucun fichier instantané créé."
+
+#: uTubeSnapshot.py:43
+msgid "An unexpected error occurred."
+msgstr "Une erreur inattendue s'est produite."
+
+#: uTubeSnapshot.py:47
+msgid "Full-size snapshot complete"
+msgstr "Image instantanée en taille réelle complète"
+
+#: uTubeTrim.py:16
+msgid "Trimmed Clip"
+msgstr "Clip rogné"
