@@ -1,10 +1,10 @@
 ﻿{
   "addon_name": "uTubeDownload",
   "addon_description": "YouTube Downloader audio and video Fully effective with Queue and Resume systems when restart",
-  "addon_version": "2025.9",
+  "addon_version": "2025.10",
   "addon_author": "chaichaimee",
   "addon_url": "https://github.com/chaichaimee/uTubeDownload",
-  "addon_download_url": "https://github.com/chaichaimee/uTubeDownload/releases/download/v2025.9/uTubeDownload-v2025.9.nvda-addon",
+  "addon_download_url": "https://github.com/chaichaimee/uTubeDownload/releases/download/v2025.10/uTubeDownload-v2025.10.nvda-addon",
   "addon_min_nvda_version": "2022.4"
 }
 
