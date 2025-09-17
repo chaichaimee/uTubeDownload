@@ -624,7 +624,7 @@ def convertToMP(mpFormat, savePath, isPlaylist=False, url=None, title=None):
                 "-x", "--audio-format", "mp3",
                 "--audio-quality", str(getINI("MP3Quality")),
                 "--ffmpeg-location", ConverterEXE,
-                "-o", output, url
+                "-o", output, "--ignore-errors", "--no-warnings", url
             ]
             if use_multipart:
                 aria2_args = f"-x{connections} -j{connections} -s{connections} -k1M --file-allocation=none --allow-overwrite=true --max-tries=0 --retry-wait=1"
@@ -636,7 +636,7 @@ def convertToMP(mpFormat, savePath, isPlaylist=False, url=None, title=None):
                 "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
                 "--remux-video", "mp4",
                 "--ffmpeg-location", ConverterEXE,
-                "-o", output, url
+                "-o", output, "--ignore-errors", "--no-warnings", url
             ]
             if use_multipart:
                 aria2_args = f"-x{connections} -j{connections} -s{connections} -k1M --file-allocation=none --allow-overwrite=true --max-tries=0 --retry-wait=1"
@@ -693,4 +693,3 @@ def convertToMP(mpFormat, savePath, isPlaylist=False, url=None, title=None):
 def setSpeed(sp):
     speech.setSpeechOption("rate", sp)
     speech.speak(" ")
-
