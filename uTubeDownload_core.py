@@ -23,21 +23,31 @@ import tones
 import shutil
 import tempfile
 import psutil
+import sys
+from queue import Queue
 
 AddOnSummary = "uTubeDownload"
 AddOnName = "uTubeDownload"
-AddOnPath = os.path.dirname(__file__)
+if sys.version_info.major >= 3 and sys.version_info.minor >= 10:
+    AddOnPath = os.path.dirname(__file__)
+else:
+    AddOnPath = os.path.dirname(__file__)
 ToolsPath = os.path.join(AddOnPath, "Tools")
 SoundPath = os.path.join(AddOnPath, "sounds")
 AppData = os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming')
 DownloadPath = None
 sectionName = AddOnName
-processID = None
-_download_queue_lock = threading.Lock()
-_current_download_thread = None
+_download_queue = Queue()
 _heartbeat_thread = None
 _heartbeat_active = False
 Aria2cEXE = os.path.join(ToolsPath, "aria2c.exe")
+YouTubeEXE = os.path.join(ToolsPath, "yt-dlp.exe")
+ConverterEXE = os.path.join(ToolsPath, "ffmpeg.exe")
+ConverterPath = ToolsPath
+_global_state_lock = threading.Lock()
+_global_active_downloads = 0
+_global_active_lock = threading.Lock()
+_num_workers = config.conf[sectionName]["MaxConcurrentDownloads"]
 
 def getStateFilePath():
     try:
@@ -48,11 +58,7 @@ def getStateFilePath():
         return os.path.join(configDir, 'uTubeDownload.json')
     except Exception:
         return os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming', 'nvda', 'uTubeDownload.json')
-
 StateFilePath = getStateFilePath()
-YouTubeEXE = os.path.join(ToolsPath, "yt-dlp.exe")
-ConverterEXE = os.path.join(ToolsPath, "ffmpeg.exe")
-ConverterPath = ToolsPath
 
 def getINI(key):
     return config.conf[sectionName][key]
@@ -119,10 +125,9 @@ def loadState():
         if os.path.exists(StateFilePath):
             with open(StateFilePath, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        return []
     except Exception as e:
         log(f"Error loading state: {e}")
-        return []
+    return []
 
 def clearState():
     try:
@@ -133,41 +138,46 @@ def clearState():
         log(f"Error clearing state: {e}")
 
 def addDownloadToQueue(download_obj):
-    queue = loadState()
-    download_obj["id"] = str(uuid.uuid4())
-    download_obj["start_time"] = datetime.datetime.now().isoformat()
-    download_obj["status"] = "queued"
-    queue.append(download_obj)
-    saveState(queue)
-    log(f"Added download to queue: ID {download_obj['id']}")
-    return download_obj["id"]
+    with _global_state_lock:
+        queue = loadState()
+        download_obj["id"] = str(uuid.uuid4())
+        download_obj["start_time"] = datetime.datetime.now().isoformat()
+        download_obj["status"] = "queued"
+        queue.append(download_obj)
+        saveState(queue)
+        log(f"Added download to queue: ID {download_obj['id']}")
+        return download_obj["id"]
 
 def updateDownloadStatusInQueue(download_id, status):
-    queue = loadState()
-    updated = False
-    for item in queue:
-        if item.get("id") == download_id:
-            item["status"] = status
-            if status in ["completed", "failed", "cancelled"]:
-                item["end_time"] = datetime.datetime.now().isoformat()
-            updated = True
-            break
-    if updated:
-        saveState(queue)
+    with _global_state_lock:
+        queue = loadState()
+        updated = False
+        for item in queue:
+            if item.get("id") == download_id:
+                item["status"] = status
+                if status in ["completed", "failed", "cancelled"]:
+                    item["end_time"] = datetime.datetime.now().isoformat()
+                updated = True
+                break
+        if updated:
+            saveState(queue)
     log(f"Updated download status: ID {download_id} to {status}")
 
 def removeCompletedOrFailedDownloadsFromQueue():
-    queue = loadState()
-    new_queue = [item for item in queue if item.get("status") not in ["completed", "failed", "cancelled"]]
-    if len(new_queue) < len(queue):
-        saveState(new_queue)
-        log(f"Removed {len(queue) - len(new_queue)} completed/failed downloads from queue")
+    with _global_state_lock:
+        queue = loadState()
+        new_queue = [item for item in queue if item.get("status") not in ["completed", "failed", "cancelled"]]
+        if len(new_queue) < len(queue):
+            saveState(new_queue)
+            log(f"Removed {len(queue) - len(new_queue)} completed/failed downloads from queue")
 
 def makePrintable(s):
     return "".join(c if c.isprintable() else " " for c in str(s))
 
 def validFilename(s):
-    return "".join(c if c not in ["/", "\\", ":", "*", "<", ">", "?", "\"", "|", "\n", "\r", "\t"] else "_" for c in s)
+    s = str(s).strip().replace(" ", "_")
+    s = re.sub(r'(?u)[^-\w.]', '', s)
+    return s
 
 def log(s):
     try:
@@ -186,9 +196,9 @@ def createFolder(folder):
             os.makedirs(folder, exist_ok=True)
             log(f"Created folder: {folder}")
             return True
-        except Exception:
+        except Exception as e:
             ui.message(_("Cannot create folder"))
-            log(f"Failed to create folder: {folder}")
+            log(f"Failed to create folder: {e}")
             return False
     return True
 
@@ -253,31 +263,40 @@ def getWebSiteTitle():
     except Exception:
         return "Unknown_Title"
 
-def checkFileExists(savePath, title, extension):
+def checkFileExists(savePath, title, extension, is_trimming=False):
     if not getINI("SkipExisting"):
         return False
-
+    
     sanitized_title = validFilename(title)
     filename = os.path.join(savePath, f"{sanitized_title}.{extension}")
+    
+    if is_trimming:
+        # For trimming, allow download even if file exists
+        return False
+    
     if os.path.exists(filename):
-        log(f"File already exists: {filename}")
+        log(f"File '{filename}' already exists.")
         return True
-
+    
     temp_patterns = [
-        f"{filename}.part", f"{filename}.ytdl", f"{filename}.temp", f"{filename}.download",
-        f"{os.path.join(savePath, sanitized_title)}*.part",
-        f"{os.path.join(savePath, sanitized_title)}*.ytdl",
-        f"{os.path.join(savePath, sanitized_title)}*.temp",
-        f"{os.path.join(savePath, sanitized_title)}*.download",
-        f"{os.path.join(savePath, sanitized_title)}*.f*.tmp",
-        f"{os.path.join(savePath, sanitized_title)}*.f*.mp4",
-        f"{os.path.join(savePath, sanitized_title)}*.f*.webm",
-        f"{os.path.join(savePath, sanitized_title)}*.f*.m4a"
+        f"{sanitized_title}.part",
+        f"{sanitized_title}.ytdl",
+        f"{sanitized_title}.temp",
+        f"{sanitized_title}.download",
+        f"{sanitized_title}.f*.tmp",
+        f"{sanitized_title}.f*.webm",
+        f"{sanitized_title}.f*.m4a",
+        f"{sanitized_title}.f*.mp4",
+        f"{sanitized_title}.part.aria2",
+        f"{sanitized_title}.aria2"
     ]
+    
     for pattern in temp_patterns:
-        if glob.glob(pattern):
-            log(f"Found temp file matching pattern {pattern}, not skipping.")
+        full_pattern = os.path.join(savePath, pattern)
+        if glob.glob(full_pattern):
+            log(f"Found temp file matching pattern {full_pattern}, not skipping.")
             return False
+            
     return False
 
 def safeMessageBox(message, title, style):
@@ -288,239 +307,120 @@ def promptResumeDownloads(downloads_list):
     msg = _("Found {count} interrupted downloads\nResume all?").format(count=count)
     return safeMessageBox(msg, _("Resume downloads"), wx.YES_NO) == wx.YES
 
-def _kill_ffmpeg_processes():
-    try:
-        for proc in psutil.process_iter(['name']):
-            if proc.name().lower() in ['ffmpeg.exe', 'yt-dlp.exe', 'aria2c.exe']:
-                log(f"Terminating process {proc.name()} with PID {proc.pid}")
-                proc.terminate()
-                try:
-                    proc.wait(timeout=3)
-                except psutil.TimeoutExpired:
-                    log(f"Force killing process {proc.name()} with PID {proc.pid}")
-                    proc.kill()
-    except Exception as e:
-        log(f"Error terminating processes: {e}")
-
-def _cleanup_webm_files(save_path, title, file_format, check_count=2):
+def _cleanup_temp_files(save_path, title, file_format, check_count=2):
     if not title or not save_path:
-        log(f"Webm cleanup skipped: title or path missing (title: {title}, path: {save_path})")
+        log(f"Temp cleanup skipped: title or path missing (title: {title}, path: {save_path})")
         return
-
     sanitized_title = validFilename(title)
     base_filename = os.path.join(save_path, sanitized_title)
-
-    for _ in range(check_count):
-        temp_patterns = [
-            f"{base_filename}.webm",
-            f"{base_filename}*.webm",
-            f"{base_filename}*.f*.webm",
-            os.path.join(save_path, f"*{sanitized_title}*.webm"),
-            os.path.join(save_path, f"*{sanitized_title}*.f*.webm"),
-            os.path.join(save_path, f"*{sanitized_title}*-[0-9]*.webm"),
-            os.path.join(save_path, f"*{sanitized_title}*[a-zA-Z0-9_-]*.webm"),
-            os.path.join(save_path, "*.webm")
-        ]
-        # Add .mp4 cleanup for MP3 mode only
-        if file_format == "mp3":
-            temp_patterns.extend([
-                f"{base_filename}.mp4",
-                f"{base_filename}*.mp4",
-                f"{base_filename}*.f*.mp4",
-                os.path.join(save_path, f"*{sanitized_title}*.mp4"),
-                os.path.join(save_path, f"*{sanitized_title}*.f*.mp4"),
-                os.path.join(save_path, f"*{sanitized_title}*-[0-9]*.mp4"),
-                os.path.join(save_path, f"*{sanitized_title}*[a-zA-Z0-9_-]*.mp4"),
-                os.path.join(save_path, "*.mp4")
-            ])
-        for pattern in temp_patterns:
-            for temp_file in glob.glob(pattern):
-                try:
-                    if os.path.exists(temp_file) and (file_format != "mp4" or temp_file.lower() != f"{base_filename}.mp4".lower()):
-                        os.remove(temp_file)
-                        log(f"Removed temp file in cleanup_webm_files: {temp_file}")
-                except Exception as e:
-                    log(f"Error removing temp file {temp_file}: {e}")
-
-def _process_next_download():
-    global _current_download_thread
-
-    with _download_queue_lock:
-        removeCompletedOrFailedDownloadsFromQueue()
-        queue = loadState()
-
-        next_download = None
-        for item in queue:
-            if item.get("status") == "queued":
-                next_download = item
-                break
-
-        if next_download and _current_download_thread is None:
-            updateDownloadStatusInQueue(next_download.get("id"), "running")
-
-            title = next_download.get("title", _("Unknown title"))
-            file_format = next_download.get("format", _("unknown format"))
-            url = next_download.get("url", _("unknown URL"))
-            cmd = next_download.get("cmd")
-            save_path = next_download.get("path")
-            is_playlist = next_download.get("is_playlist", False)
-            download_id = next_download.get("id")
-            trimming = next_download.get("trimming", False)
-
-            if not cmd or not save_path or not url or not title or not file_format or download_id is None:
-                updateDownloadStatusInQueue(download_id, "failed")
-                wx.CallAfter(_process_next_download)
-                return
-
-            _cleanup_webm_files(save_path, title, file_format)
-            startHeartbeat()
-            _current_download_thread = converterThread(cmd, save_path, url, title, file_format,
-                                                       resume=False, is_playlist=is_playlist, download_id=download_id, trimming=trimming)
-            _current_download_thread.daemon = True
-            _current_download_thread.start()
-            WaitThread(_current_download_thread).start()
-
-        elif not next_download:
-            removeCompletedOrFailedDownloadsFromQueue()
-
-def _on_download_complete(download_id, status):
-    global _current_download_thread
-
-    with _download_queue_lock:
-        updateDownloadStatusInQueue(download_id, status)
-        _current_download_thread = None
-        stopHeartbeat()
-        if status == "completed":
-            PlayWave("complete")
-            queue = loadState()
-            for item in queue:
-                if item.get("id") == download_id:
-                    if item.get("trimming", False):
-                        wx.CallAfter(ui.message, _("Trim complete"))
-                    else:
-                        _cleanup_temp_files_immediately(
-                            item.get("title", ""),
-                            item.get("path", ""),
-                            item.get("format", "")
-                        )
-                    break
-        elif status == "failed":
-            queue = loadState()
-            for item in queue:
-                if item.get("id") == download_id:
-                    if item.get("trimming", False):
-                        wx.CallAfter(ui.message, _("Trim failed"))
-                    else:
-                        wx.CallAfter(ui.message, _("Download failed"))
-                    break
-
-    winsound.PlaySound(None, winsound.SND_PURGE)
-    wx.CallAfter(_process_next_download)
-
-def _cleanup_temp_files_immediately(title, path, file_format):
-    if not title or not path:
-        log(f"Temp cleanup skipped: title or path missing (title: {title}, path: {path})")
-        return
-
-    sanitized_title = validFilename(title)
-    base_filename = os.path.join(path, sanitized_title)
-
+    
     temp_patterns = [
-        f"{base_filename}.part", f"{base_filename}.ytdl", f"{base_filename}.temp", f"{base_filename}.download",
-        f"{base_filename}*.f*.tmp", f"{base_filename}*.f*.webm", f"{base_filename}*.f*.m4a",
-        f"{base_filename}.webm", f"{base_filename}.m4a", f"{base_filename}.opus",
-        f"{base_filename}.aria2", f"{base_filename}.part.aria2",
-        f"{base_filename}*.aria2", f"{base_filename}*.part.aria2",
-        f"{base_filename}*-[0-9]*.webm", f"{base_filename}*[a-zA-Z0-9_-]*.webm", os.path.join(path, "*.webm"),
-        f"{base_filename}*.f*.m4a.part.aria2", f"{base_filename}*.f*.webm.part.aria2"
+        f"{sanitized_title}.part",
+        f"{sanitized_title}.ytdl",
+        f"{sanitized_title}.temp",
+        f"{sanitized_title}.download",
+        f"{sanitized_title}.f*.tmp",
+        f"{sanitized_title}.f*.webm",
+        f"{sanitized_title}.f*.m4a",
+        f"{sanitized_title}.f*.mp4",
+        f"{sanitized_title}.part.aria2",
+        f"{sanitized_title}.aria2"
     ]
-    # Add .mp4 cleanup for MP3 mode only
+    
     if file_format == "mp3":
-        temp_patterns.extend([
-            f"{base_filename}.mp4",
-            f"{base_filename}*.mp4",
-            f"{base_filename}*.f*.mp4",
-            os.path.join(path, f"*{sanitized_title}*.mp4"),
-            os.path.join(path, f"*{sanitized_title}*.f*.mp4"),
-            os.path.join(path, f"*{sanitized_title}*-[0-9]*.mp4"),
-            os.path.join(path, f"*{sanitized_title}*[a-zA-Z0-9_-]*.mp4"),
-            os.path.join(path, "*.mp4"),
-            f"{base_filename}*.f*.mp4.part.aria2",
-            os.path.join(path, "*.mp4.part.aria2")
-        ])
-    if "is_playlist" in loadState() and loadState() and loadState()[0].get("is_playlist", False):
-        playlist_temp_patterns = [
-            os.path.join(path, f"*{sanitized_title}*.part"), os.path.join(path, f"*{sanitized_title}*.ytdl"),
-            os.path.join(path, f"*{sanitized_title}*.temp"), os.path.join(path, f"*{sanitized_title}*.download"),
-            os.path.join(path, f"*{sanitized_title}*.f*.tmp"), os.path.join(path, f"*{sanitized_title}*.f*.webm"),
-            os.path.join(path, f"*{sanitized_title}*.f*.m4a"),
-            os.path.join(path, f"*{sanitized_title}.webm"), os.path.join(path, f"*{sanitized_title}.m4a"),
-            os.path.join(path, f"*{sanitized_title}.opus"), os.path.join(path, f"*{sanitized_title}*-[0-9]*.webm"),
-            os.path.join(path, f"*{sanitized_title}*[a-zA-Z0-9_-]*.webm"), os.path.join(path, "*.webm"),
-            os.path.join(path, f"*{sanitized_title}*.part.aria2"), os.path.join(path, f"*{sanitized_title}*.aria2"),
-            os.path.join(path, f"*{sanitized_title}*.f*.m4a.part.aria2"),
-            os.path.join(path, f"*{sanitized_title}*.f*.webm.part.aria2")
-        ]
-        if file_format == "mp3":
-            playlist_temp_patterns.extend([
-                os.path.join(path, f"*{sanitized_title}*.mp4"),
-                os.path.join(path, f"*{sanitized_title}*.f*.mp4"),
-                os.path.join(path, f"*{sanitized_title}*-[0-9]*.mp4"),
-                os.path.join(path, f"*{sanitized_title}*[a-zA-Z0-9_-]*.mp4"),
-                os.path.join(path, f"*{sanitized_title}*.f*.mp4.part.aria2")
-            ])
-        temp_patterns.extend(playlist_temp_patterns)
-    generic_temp_patterns = [
-        os.path.join(path, "*.part"), os.path.join(path, "*.ytdl"), os.path.join(path, "*.temp"), os.path.join(path, "*.download"),
-        os.path.join(path, "*.f*.tmp"), os.path.join(path, "*.f*.webm"), os.path.join(path, "*.f*.m4a"),
-        os.path.join(path, "*.webm"), os.path.join(path, "*.part.aria2"), os.path.join(path, "*.aria2"),
-        os.path.join(path, "*.f*.m4a.part.aria2"), os.path.join(path, "*.f*.webm.part.aria2")
-    ]
-    if file_format == "mp3":
-        generic_temp_patterns.extend([
-            os.path.join(path, "*.mp4"),
-            os.path.join(path, "*.f*.mp4"),
-            os.path.join(path, "*.mp4.part.aria2")
-        ])
-    temp_patterns.extend(generic_temp_patterns)
-    unique_temp_patterns = list(set(temp_patterns))
-    for pattern in unique_temp_patterns:
-        for temp_file in glob.glob(pattern):
-            try:
-                final_target_file_pattern = os.path.join(path, f"{sanitized_title}.{file_format}")
-                if file_format != "mp4" or temp_file.lower() != final_target_file_pattern.lower():
-                    if os.path.exists(temp_file):
+        temp_patterns.append(f"{sanitized_title}.mp4")
+    
+    final_file = os.path.join(save_path, f"{sanitized_title}.{file_format}")
+    
+    for _ in range(check_count):
+        for pattern in temp_patterns:
+            for temp_file in glob.glob(os.path.join(save_path, pattern)):
+                # Skip the final output file
+                if temp_file == final_file:
+                    continue
+                # Only delete temporary files
+                if ('f' in os.path.basename(temp_file).split('.')[0] or 
+                    temp_file.endswith(('.part', '.ytdl', '.temp', '.download', '.aria2', '.part.aria2', '.mp4'))):
+                    try:
                         os.remove(temp_file)
                         log(f"Removed temp file: {temp_file}")
-            except Exception as e:
-                log(f"Error removing temp file {temp_file}: {e}")
+                    except Exception as e:
+                        log(f"Error removing temp file {temp_file}: {e}")
+
+def get_video_duration(url):
+    try:
+        cmd = [YouTubeEXE, "--get-duration", "--no-playlist", url]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+        if result.returncode == 0:
+            duration_str = result.stdout.strip()
+            if duration_str:
+                parts = duration_str.split(':')
+                if len(parts) == 3:
+                    h, m, s = map(int, parts)
+                    return h * 3600 + m * 60 + s
+                elif len(parts) == 2:
+                    m, s = map(int, parts)
+                    return m * 60 + s
+                elif len(parts) == 1:
+                    return int(parts[0])
+                else:
+                    return None
+        return None
+    except Exception as e:
+        log(f"Error getting video duration: {e}")
+    return None
+
+def get_file_duration(file_path):
+    try:
+        cmd = [ConverterEXE, "-i", file_path, "-show_entries", "format=duration", "-v", "quiet", "-of", "csv=p=0"]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+        if result.returncode == 0:
+            duration_str = result.stdout.strip()
+            if duration_str:
+                return float(duration_str)
+        return None
+    except Exception as e:
+        log(f"Error getting file duration: {e}")
+    return None
 
 def repairIncompleteFiles(path):
     repaired_count = 0
     patterns = [
-        "*.part", "*.ytdl", "*.temp", "*.download", "*.f*.tmp", "*.f*.mp4", "*.f*.webm", "*.f*.m4a",
-        "*.part.aria2", "*.aria2", "*.f*.m4a.part.aria2", "*.f*.mp4.part.aria2", "*.f*.webm.part.aria2"
+        "*.part", "*.ytdl", "*.temp", "*.download", "*.f*.tmp",
+        "*.f*.webm", "*.f*.m4a", "*.f*.mp4", "*.part.aria2", "*.aria2"
     ]
     
     for pattern in patterns:
-        for temp_file in glob.glob(os.path.join(path, pattern)):
+        full_pattern = os.path.join(path, pattern)
+        for temp_file in glob.glob(full_pattern):
             try:
-                base_name = os.path.splitext(temp_file)[0]
-                if os.path.exists(base_name + ".mp4"):
-                    target = base_name + ".mp4"
-                elif os.path.exists(base_name + ".mp3"):
-                    target = base_name + ".mp3"
-                else:
+                base_name, _ = os.path.splitext(temp_file)
+                if base_name.endswith('.part') or base_name.endswith('.aria2'):
+                    base_name, _ = os.path.splitext(base_name)
+                
+                original_file = os.path.splitext(base_name)[0]
+                
+                if os.path.exists(original_file + '.mp4') or os.path.exists(original_file + '.mp3'):
+                    log(f"Skipping repair for {temp_file}: corresponding file already exists.")
                     continue
                 
+                matches = re.findall(r"^(.*?)(?:-\w+)?(?:\.\w+)?$", original_file)
+                if matches:
+                    potential_final_base = matches[0]
+                    target_mp4 = os.path.join(path, f"{potential_final_base}.mp4")
+                    target_mp3 = os.path.join(path, f"{potential_final_base}.mp3")
+                    
+                    if os.path.exists(target_mp4) or os.path.exists(target_mp3):
+                        log(f"Skipping repair for {temp_file}: corresponding final file exists.")
+                        continue
+                
                 if os.path.getsize(temp_file) > 0:
-                    shutil.copy(temp_file, target)
                     os.remove(temp_file)
                     repaired_count += 1
-                    log(f"Repaired incomplete file: {temp_file} -> {target}")
+                    log(f"Cleaned up incomplete file: {temp_file}")
             except Exception as e:
                 log(f"Error repairing file {temp_file}: {str(e)}")
-    
+
     return repaired_count
 
 def resumeInterruptedDownloads():
@@ -528,37 +428,147 @@ def resumeInterruptedDownloads():
         return
     if not os.path.exists(StateFilePath):
         saveState([])
-    queue = loadState()
+    with _global_state_lock:
+        queue = loadState()
     downloads_to_resume = [item for item in queue if item.get("status") in ["running", "queued"]]
     if not downloads_to_resume:
         return
-    
-    # Auto-repair before resuming
     path = getINI("ResultFolder") or DownloadPath
     if os.path.isdir(path):
         repaired = repairIncompleteFiles(path)
         log(f"Auto-repaired {repaired} files before resuming downloads")
-    
+
     ui.message(_("Checking interrupted downloads..."))
-    _kill_ffmpeg_processes()
     for item in downloads_to_resume:
         if YouTubeEXE in item["cmd"][0] and "--continue" not in item["cmd"]:
             item["cmd"].insert(1, "--continue")
         updateDownloadStatusInQueue(item.get("id"), "queued")
         if item.get("format") == "mp3":
-            _cleanup_webm_files(item.get("path", ""), item.get("title", ""), item.get("format", ""))
+            _cleanup_temp_files(item.get("path", ""), item.get("title", ""), item.get("format", ""))
     if not promptResumeDownloads(downloads_to_resume):
         for item in downloads_to_resume:
             updateDownloadStatusInQueue(item.get("id"), "cancelled")
         clearState()
         return
     for item in downloads_to_resume:
-        if YouTubeEXE in item["cmd"][0] and "--continue" not in item["cmd"]:
-            item["cmd"].insert(1, "--continue")
         updateDownloadStatusInQueue(item.get("id"), "queued")
         if item.get("format") == "mp3":
-            _cleanup_webm_files(item.get("path", ""), item.get("title", ""), item.get("format", ""))
-    wx.CallAfter(_process_next_download)
+            _cleanup_temp_files(item.get("path", ""), item.get("title", ""), item.get("format", ""))
+        _download_queue.put(item)
+
+def start_worker_threads():
+    global _num_workers
+    _num_workers = getINI("MaxConcurrentDownloads")
+    for _ in range(_num_workers):
+        t = threading.Thread(target=worker_loop, daemon=True)
+        t.start()
+
+def shutdown_workers():
+    for _ in range(_num_workers):
+        _download_queue.put(None)
+
+def worker_loop():
+    while True:
+        item = _download_queue.get()
+        if item is None:
+            break
+        run_download(item)
+        _download_queue.task_done()
+
+def _process_next_download():
+    # Placeholder for processing the next download in the queue
+    # This will be called by uTubeTrim to ensure queue processing
+    pass
+
+def run_download(item):
+    download_id = item["id"]
+    cmd = item["cmd"]
+    save_path = item["path"]
+    url = item["url"]
+    title = item["title"]
+    file_format = item["format"]
+    is_playlist = item.get("is_playlist", False)
+    is_trimming = item.get("trimming", False)
+    
+    with _global_active_lock:
+        global _global_active_downloads
+        _global_active_downloads += 1
+        if _global_active_downloads == 1:
+            wx.CallAfter(startHeartbeat)
+    
+    updateDownloadStatusInQueue(download_id, "running")
+    log(f"Starting download for ID: {download_id}")
+    log(f"Command: {cmd}")
+    
+    process = None
+    try:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=save_path,
+            startupinfo=si,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        log(f"Process started with PID: {process.pid}")
+
+        timeout = 1800
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+            return_code = process.returncode
+
+            stdout_str = stdout.decode('utf-8', errors='ignore')
+            stderr_str = stderr.decode('utf-8', errors='ignore')
+            
+            if return_code == 0:
+                log(f"Download for ID {download_id} completed successfully.")
+                log(f"STDOUT: {stdout_str}")
+                PlayWave('complete')
+                if getINI("SayDownloadComplete"):
+                    wx.CallAfter(ui.message, _("Download complete"))
+                updateDownloadStatusInQueue(download_id, "completed")
+            else:
+                log(f"Download for ID {download_id} failed with return code {return_code}.")
+                log(f"STDOUT: {stdout_str}")
+                log(f"STDERR: {stderr_str}")
+                PlayWave('failed')
+                wx.CallAfter(ui.message, _("Download failed"))
+                updateDownloadStatusInQueue(download_id, "failed")
+        except subprocess.TimeoutExpired:
+            log(f"Download for ID {download_id} timed out after {timeout} seconds.")
+            if process:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+            PlayWave('failed')
+            wx.CallAfter(ui.message, _("Download failed due to timeout"))
+            updateDownloadStatusInQueue(download_id, "failed")
+    except Exception as e:
+        log(f"Error during download execution for ID {download_id}: {e}")
+        if process:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        PlayWave('failed')
+        wx.CallAfter(ui.message, _("Download failed due to an error"))
+        updateDownloadStatusInQueue(download_id, "failed")
+    finally:
+        if not is_trimming:
+            _cleanup_temp_files(save_path, title, file_format)
+        removeCompletedOrFailedDownloadsFromQueue()
+        with _global_active_lock:
+            _global_active_downloads -= 1
+            if _global_active_downloads == 0:
+                wx.CallAfter(stopHeartbeat)
+        log(f"Download for ID {download_id} finished.")
 
 def convertToMP(mpFormat, savePath, isPlaylist=False, url=None, title=None):
     if not isBrowser():
@@ -567,18 +577,24 @@ def convertToMP(mpFormat, savePath, isPlaylist=False, url=None, title=None):
     if not createFolder(savePath):
         ui.message(_("Cannot create folder"))
         return
-    
-    # Auto-repair before new download
     if os.path.isdir(savePath):
         repaired = repairIncompleteFiles(savePath)
         log(f"Auto-repaired {repaired} files before new download")
-    
+
     url = url or getCurrentDocumentURL()
     if not url:
         ui.message(_("URL not found"))
         return
     is_youtube_url = any(y in url for y in [".youtube.", "youtu.be", "youtube.com"])
     if is_youtube_url:
+        video_title = getWebSiteTitle()
+        sanitized_title = validFilename(video_title)
+        if checkFileExists(savePath, sanitized_title, mpFormat):
+            if mpFormat == "mp3" and os.path.exists(os.path.join(savePath, f"{sanitized_title}.mp4")):
+                log(f"MP4 exists for {sanitized_title}, allowing MP3 download")
+            else:
+                ui.message(_("File exists"))
+                return
         if not isPlaylist:
             parsed = urllib.parse.urlparse(url)
             query_params = urllib.parse.parse_qs(parsed.query)
@@ -596,11 +612,6 @@ def convertToMP(mpFormat, savePath, isPlaylist=False, url=None, title=None):
         if not os.path.exists(YouTubeEXE):
             ui.message(_("yt-dlp.exe missing"))
             return
-        title = title or getWebSiteTitle()
-        if checkFileExists(savePath, title, mpFormat):
-            ui.message(_("File exists"))
-            return
-        ui.message(_("Download {format}").format(format=mpFormat.upper()))
         PlayWave("start")
         output = os.path.join(savePath, "%(title)s.%(ext)s")
         
@@ -613,31 +624,32 @@ def convertToMP(mpFormat, savePath, isPlaylist=False, url=None, title=None):
                 "-x", "--audio-format", "mp3",
                 "--audio-quality", str(getINI("MP3Quality")),
                 "--ffmpeg-location", ConverterEXE,
-                "-o", output, url
+                "-o", output, "--ignore-errors", "--no-warnings", url
             ]
             if use_multipart:
                 aria2_args = f"-x{connections} -j{connections} -s{connections} -k1M --file-allocation=none --allow-overwrite=true --max-tries=0 --retry-wait=1"
                 cmd.extend(["--external-downloader", Aria2cEXE, 
-                            "--external-downloader-args", aria2_args])
+                            "--external-downloader-args", f"aria2c:{aria2_args}"])
         else:
             cmd = [
                 YouTubeEXE, "--no-playlist" if not isPlaylist else "--yes-playlist",
-                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                "--merge-output-format", "mp4",
+                "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
+                "--remux-video", "mp4",
                 "--ffmpeg-location", ConverterEXE,
-                "-o", output, url
+                "-o", output, "--ignore-errors", "--no-warnings", url
             ]
             if use_multipart:
                 aria2_args = f"-x{connections} -j{connections} -s{connections} -k1M --file-allocation=none --allow-overwrite=true --max-tries=0 --retry-wait=1"
                 cmd.extend(["--external-downloader", Aria2cEXE, 
-                            "--external-downloader-args", aria2_args])
+                            "--external-downloader-args", f"aria2c:{aria2_args}"])
             else:
                 cmd.extend(["--concurrent-fragments", str(connections)])
-        download_id = addDownloadToQueue({
-            "url": url, "title": title, "format": mpFormat,
+        download_obj = {
+            "url": url, "title": sanitized_title, "format": mpFormat,
             "path": savePath, "cmd": cmd, "is_playlist": isPlaylist
-        })
-        wx.CallAfter(_process_next_download)
+        }
+        download_id = addDownloadToQueue(download_obj)
+        _download_queue.put(download_obj)
     else:
         ext = getMultimediaURLExtension()
         ext = ext.lstrip(".")
@@ -669,91 +681,15 @@ def convertToMP(mpFormat, savePath, isPlaylist=False, url=None, title=None):
                 ]
             ui.message(_("Adding link as {format} to download queue").format(format=mpFormat.upper()))
             PlayWave("start")
-            initial_state = {
+            download_obj = {
                 "url": multimediaLinkURL, "title": linkName, "format": mpFormat,
                 "path": savePath, "cmd": cmd, "is_playlist": False
             }
-            download_id = addDownloadToQueue(initial_state)
-            wx.CallAfter(_process_next_download)
+            download_id = addDownloadToQueue(download_obj)
+            _download_queue.put(download_obj)
         else:
             ui.message(_("Not a YouTube video or valid multimedia link"))
 
-class converterThread(threading.Thread):
-    def __init__(self, cmd, path, url, title, file_format, download_id=None, resume=False, is_playlist=False, trimming=False):
-        super().__init__()
-        self.cmd = cmd
-        self.path = path
-        self.url = url
-        self.title = title
-        self.file_format = file_format
-        self.download_id = download_id
-        self.resume = resume
-        self.is_playlist = is_playlist
-        self.trimming = trimming
-        self.daemon = True
-        self.process = None
-
-    def run(self):
-        global processID
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        try:
-            if not os.path.isdir(self.path):
-                _on_download_complete(self.download_id, "failed")
-                return
-            
-            if self.trimming:
-                wx.CallAfter(tones.beep, 1000, 100)
-            else:
-                PlayWave("start")
-            
-            self.process = subprocess.Popen(
-                self.cmd,
-                cwd=self.path,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                startupinfo=si,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-                encoding="utf-8",
-                text=True,
-                errors='ignore'
-            )
-            processID = self.process.pid
-            
-            stdout, stderr = self.process.communicate()
-            
-            if stdout:
-                log(f"Process stdout: {stdout[:500]}")
-            if stderr:
-                log(f"Process stderr: {stderr[:500]}")
-            
-            if self.file_format == "mp3":
-                _kill_ffmpeg_processes()
-                _cleanup_webm_files(self.path, self.title, self.file_format)
-            
-            if self.process.returncode == 0:
-                if self.trimming:
-                    wx.CallAfter(tones.beep, 2000, 100)
-                _on_download_complete(self.download_id, "completed")
-            else:
-                if self.trimming:
-                    wx.CallAfter(tones.beep, 500, 300)
-                _on_download_complete(self.download_id, "failed")
-        except Exception as e:
-            log(f"Download exception: {str(e)}")
-            if self.trimming:
-                wx.CallAfter(tones.beep, 500, 300)
-            _on_download_complete(self.download_id, "failed")
-        finally:
-            processID = None
-
-class WaitThread(threading.Thread):
-    def __init__(self, targetThread):
-        super().__init__()
-        self.target = targetThread
-        self.daemon = True
-    def run(self):
-        while self.target.is_alive():
-            time.sleep(0.5)
-        self.target.join()
+def setSpeed(sp):
+    speech.setSpeechOption("rate", sp)
+    speech.speak(" ")

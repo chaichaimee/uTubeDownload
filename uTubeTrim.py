@@ -23,7 +23,8 @@ from .uTubeDownload_core import (
     ConverterPath,
     _process_next_download,
     setINI,
-    DownloadPath
+    DownloadPath,
+    _download_queue
 )
 
 AddOnName = "uTubeDownload"
@@ -64,7 +65,7 @@ class uTubeTrimDialog(wx.Dialog):
         self.urlCtrl.SetFocus()
         self.startTimeCtrl.SetValue(config.conf[sectionName].get("TrimLastStartTime", "00:00:00"))
         
-        # ใช้ end time จากคอนฟิกเฉพาะ URL เดิมที่ตรงกัน
+        # Use end time from config only for matching previous URL
         last_url = config.conf[sectionName].get("TrimLastURL", "")
         if initial_url and initial_url == last_url:
             end_time_value = config.conf[sectionName].get("TrimLastEndTime", "")
@@ -82,12 +83,12 @@ class uTubeTrimDialog(wx.Dialog):
         self.qualityCtrl.SetStringSelection(f"{last_quality} kbps")
         self.on_format_change(None)
         
-        # ใช้ cached duration สำหรับ URL เดิม, ดึงใหม่เฉพาะ URL ใหม่
+        # Use cached duration for previous URL, fetch new for new URL
         if initial_url:
             last_url = config.conf[sectionName].get("TrimLastURL", "")
             last_duration = config.conf[sectionName].get("TrimLastDuration", "")
             if initial_url == last_url and last_duration:
-                # ใช้ค่า cached duration
+                # Use cached duration
                 self.video_duration = last_duration
                 try:
                     parts = last_duration.split(':')
@@ -104,7 +105,7 @@ class uTubeTrimDialog(wx.Dialog):
                     self.video_duration_seconds = 0
                 wx.CallAfter(self.update_duration_label)
             else:
-                # URL ใหม่: ดึงความยาววิดีโอ
+                # New URL: fetch video duration
                 threading.Thread(target=self._fetch_video_duration, daemon=True).start()
 
     def init_ui(self):
@@ -189,10 +190,10 @@ class uTubeTrimDialog(wx.Dialog):
                 self.video_duration_seconds = mins*60 + secs
             else:
                 self.video_duration_seconds = float(parts[0])
-            # บันทึก URL และ duration สำหรับครั้งถัดไป
+            # Save URL and duration for next time
             config.conf[sectionName]["TrimLastURL"] = self.initial_url
             config.conf[sectionName]["TrimLastDuration"] = duration_str
-            # ตั้งค่า end time เป็นความยาววิดีโอหากยังไม่มีค่า
+            # Set end time to video duration if not set
             if self.endTimeCtrl.GetValue() == "":
                 self.endTimeCtrl.SetValue(duration_str)
         except ValueError:
@@ -279,29 +280,33 @@ class uTubeTrimDialog(wx.Dialog):
         
         ui.message(_("Trimming and downloading {format}...").format(format=file_format.upper()))
         
+        download_sections_arg = f"*{start_time_str}-{end_time_str}"
+        
         base_cmd = [
             YouTubeEXE,
             url,
             "--no-playlist",
             "-o", f"{output_path}.%(ext)s",
             "--ffmpeg-location", os.path.join(ConverterPath, "ffmpeg.exe"),
+            "--download-sections", download_sections_arg
         ]
 
         if file_format == "mp3":
             base_cmd.extend([
                 "--extract-audio",
                 "--audio-format", "mp3",
-                "--audio-quality", str(quality_kbps),
-                "--postprocessor-args", f"ffmpeg:-ss {start_time_str} -to {end_time_str}"
+                "--audio-quality", str(quality_kbps)
             ])
-        else:
+        else: # mp4
             base_cmd.extend([
-                "-f", "bestvideo+bestaudio",
+                "-f", "bestvideo+bestaudio/best",
                 "--merge-output-format", "mp4",
-                "--postprocessor-args", f"ffmpeg:-ss {start_time_str} -to {end_time_str} -c:v libx265 -preset fast -crf 23 -c:a copy"
+                "--postprocessor-args", "ffmpeg:-c:v libx265 -preset fast -crf 23 -c:a copy"
             ])
+            # Note: The trimming is handled by --download-sections,
+            # but the postprocessor args for video encoding are still needed.
 
-        download_id = addDownloadToQueue({
+        download_obj = {
             "url": url,
             "title": output_filename,
             "format": file_format,
@@ -309,9 +314,10 @@ class uTubeTrimDialog(wx.Dialog):
             "cmd": base_cmd,
             "is_playlist": False,
             "trimming": True
-        })
-        
-        wx.CallAfter(_process_next_download)
+        }
+        download_id = addDownloadToQueue(download_obj)
+        download_obj["id"] = download_id
+        _download_queue.put(download_obj)
 
         config.conf[sectionName]["TrimLastFormat"] = file_format
         config.conf[sectionName]["TrimLastQuality"] = quality_kbps
@@ -321,3 +327,4 @@ class uTubeTrimDialog(wx.Dialog):
     
     def on_cancel(self, event):
         self.Close()
+

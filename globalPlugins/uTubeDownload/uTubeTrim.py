@@ -65,7 +65,7 @@ class uTubeTrimDialog(wx.Dialog):
         self.urlCtrl.SetFocus()
         self.startTimeCtrl.SetValue(config.conf[sectionName].get("TrimLastStartTime", "00:00:00"))
         
-        # ใช้ end time จากคอนฟิกเฉพาะ URL เดิมที่ตรงกัน
+        # Use end time from config only for matching previous URL
         last_url = config.conf[sectionName].get("TrimLastURL", "")
         if initial_url and initial_url == last_url:
             end_time_value = config.conf[sectionName].get("TrimLastEndTime", "")
@@ -83,12 +83,12 @@ class uTubeTrimDialog(wx.Dialog):
         self.qualityCtrl.SetStringSelection(f"{last_quality} kbps")
         self.on_format_change(None)
         
-        # ใช้ cached duration สำหรับ URL เดิม, ดึงใหม่เฉพาะ URL ใหม่
+        # Use cached duration for previous URL, fetch new for new URL
         if initial_url:
             last_url = config.conf[sectionName].get("TrimLastURL", "")
             last_duration = config.conf[sectionName].get("TrimLastDuration", "")
             if initial_url == last_url and last_duration:
-                # ใช้ค่า cached duration
+                # Use cached duration
                 self.video_duration = last_duration
                 try:
                     parts = last_duration.split(':')
@@ -105,7 +105,7 @@ class uTubeTrimDialog(wx.Dialog):
                     self.video_duration_seconds = 0
                 wx.CallAfter(self.update_duration_label)
             else:
-                # URL ใหม่: ดึงความยาววิดีโอ
+                # New URL: fetch video duration
                 threading.Thread(target=self._fetch_video_duration, daemon=True).start()
 
     def init_ui(self):
@@ -190,10 +190,10 @@ class uTubeTrimDialog(wx.Dialog):
                 self.video_duration_seconds = mins*60 + secs
             else:
                 self.video_duration_seconds = float(parts[0])
-            # บันทึก URL และ duration สำหรับครั้งถัดไป
+            # Save URL and duration for next time
             config.conf[sectionName]["TrimLastURL"] = self.initial_url
             config.conf[sectionName]["TrimLastDuration"] = duration_str
-            # ตั้งค่า end time เป็นความยาววิดีโอหากยังไม่มีค่า
+            # Set end time to video duration if not set
             if self.endTimeCtrl.GetValue() == "":
                 self.endTimeCtrl.SetValue(duration_str)
         except ValueError:
@@ -327,6 +327,4 @@ class uTubeTrimDialog(wx.Dialog):
     
     def on_cancel(self, event):
         self.Close()
-
-
 

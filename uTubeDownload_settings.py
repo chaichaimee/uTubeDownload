@@ -47,20 +47,24 @@ class AudioYoutubeDownloadPanel(SettingsPanel):
         )
         self.beepChk.SetValue(getINI("BeepWhileConverting"))
 
+        self.sayCompleteChk = helper.addItem(
+            wx.CheckBox(self, label=_("&Say download complete"))
+        )
+        self.sayCompleteChk.SetValue(getINI("SayDownloadComplete"))
+
         qualityLabel = _("MP3 &quality (kbps):")
         self.qualityChoice = helper.addLabeledControl(
             qualityLabel,
             wx.Choice,
-            choices=["320", "250", "190", "128"]
+            choices=["320", "256", "192", "128"]
         )
         try:
             self.qualityChoice.SetSelection(
-                ["320", "250", "190", "128"].index(str(getINI("MP3Quality")))
+                ["320", "256", "192", "128"].index(str(getINI("MP3Quality")))
             )
         except ValueError:
             self.qualityChoice.SetSelection(0)
 
-        # Download section settings moved here
         self.multipartChk = helper.addItem(
             wx.CheckBox(self, label=_("Use download section"))
         )
@@ -77,7 +81,7 @@ class AudioYoutubeDownloadPanel(SettingsPanel):
                 getINI("MultiPartConnections") - 1
             )
         except Exception:
-            self.connectionsChoice.SetSelection(7)  # Default to 8
+            self.connectionsChoice.SetSelection(7)
 
         self.playlistModeChk = helper.addItem(
             wx.CheckBox(self, label=_("Enable &playlist mode by default"))
@@ -117,6 +121,7 @@ class AudioYoutubeDownloadPanel(SettingsPanel):
                     return
             setINI("ResultFolder", folder)
             setINI("BeepWhileConverting", self.beepChk.GetValue())
+            setINI("SayDownloadComplete", self.sayCompleteChk.GetValue())
             setINI("MP3Quality", int(self.qualityChoice.GetStringSelection()))
             setINI("PlaylistMode", self.playlistModeChk.GetValue())
             setINI("SkipExisting", self.skipExistingChk.GetValue())
@@ -124,3 +129,6 @@ class AudioYoutubeDownloadPanel(SettingsPanel):
             setINI("Logging", self.loggingChk.GetValue())
             setINI("UseMultiPart", self.multipartChk.GetValue())
             setINI("MultiPartConnections", int(self.connectionsChoice.GetStringSelection()))
+
+
+

@@ -56,11 +56,11 @@ class AudioYoutubeDownloadPanel(SettingsPanel):
         self.qualityChoice = helper.addLabeledControl(
             qualityLabel,
             wx.Choice,
-            choices=["320", "250", "190", "128"]
+            choices=["320", "256", "192", "128"]
         )
         try:
             self.qualityChoice.SetSelection(
-                ["320", "250", "190", "128"].index(str(getINI("MP3Quality")))
+                ["320", "256", "192", "128"].index(str(getINI("MP3Quality")))
             )
         except ValueError:
             self.qualityChoice.SetSelection(0)
@@ -129,5 +129,6 @@ class AudioYoutubeDownloadPanel(SettingsPanel):
             setINI("Logging", self.loggingChk.GetValue())
             setINI("UseMultiPart", self.multipartChk.GetValue())
             setINI("MultiPartConnections", int(self.connectionsChoice.GetStringSelection()))
+
 
 

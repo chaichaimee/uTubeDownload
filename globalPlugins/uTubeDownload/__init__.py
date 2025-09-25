@@ -1,6 +1,4 @@
-#  __init__.py
-# Copyright (C) 2025 ['chai chaimee]
-# Licensed under GNU General Public License. See COPYING.txt for details.
+# __init__.py
 
 import globalPluginHandler
 from scriptHandler import script
@@ -197,6 +195,16 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
     @script(description=_("uTubeTrim setting"), gesture="kb:NVDA+alt+y")
     def script_uTubeTrim(self, gesture):
+        # Check if focus is on YouTube page
+        current_app = self.core_functions['getCurrentAppName']()
+        url = self.core_functions['getCurrentDocumentURL']()
+        
+        # Allow only when on YouTube pages
+        if not url or ("youtube.com" not in url.lower() and "youtu.be" not in url.lower()):
+            # Pass the gesture through to the application
+            gesture.send()
+            return
+        
         self.core_functions['log']("Attempting to open uTubeTrim dialog")
         if not self.uTubeTrimDialog:
             ui.message(_("Error: uTubeTrim module not available"))
@@ -244,4 +252,5 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         except ImportError as e:
             self.core_functions['log'](f"Error importing uTubeSnapshot: {e}")
             ui.message(_("Error: uTubeSnapshot module not available"))
+
 
